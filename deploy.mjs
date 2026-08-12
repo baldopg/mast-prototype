@@ -61,7 +61,11 @@ if (failed && !checkOnly) {
 if (!checkOnly) {
   console.log('\nDesplegando\n');
   try {
-    const out = execFileSync('netlify', ['deploy', '--prod', '--no-build'], { encoding: 'utf8' });
+    // On Windows `netlify` is a .cmd shim, which execFileSync cannot resolve on its own.
+    const out = execFileSync('netlify', ['deploy', '--prod', '--no-build'], {
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    });
     const url = out.match(/Unique deploy URL:\s*<?(\S+?)>?\s/);
     console.log('  ok    desplegado' + (url ? ` (${url[1]})` : ''));
   } catch (e) {
