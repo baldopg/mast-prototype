@@ -71,6 +71,18 @@
   button.plain{border:none; padding:11px 0; color:var(--ink-dim); text-decoration:underline; text-underline-offset:4px}
 
   .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  /* Seeded triggers. Someone who cannot think of one still ends up with a
+     trigger the recogniser can actually work with. */
+  .seeds{flex-direction:column; align-items:stretch; gap:8px; margin-top:-14px}
+  .seeds button{
+    font-family:var(--serif); font-size:15.5px; text-align:left;
+    border-radius:9px; padding:11px 14px; color:var(--ink-dim); line-height:1.4;
+  }
+  .seeds button:hover{color:var(--ink)}
+  #hint b{color:var(--ink); font-weight:normal; font-family:var(--serif)}
+  #skip{background:none; border:none; padding:0; margin-top:10px; font-size:13.5px;
+        color:var(--ink-faint); text-decoration:underline; text-underline-offset:4px; cursor:pointer}
+  #skip:hover{color:var(--ink-dim)}
 
   .level{
     border:1px solid var(--line); border-radius:12px; padding:16px 18px;
@@ -149,6 +161,12 @@
   <p class="voice">When should I give it back to you?</p>
   <p class="voice dim">Don't give me a date. Tell me what state you'll be in.</p>
   <textarea id="in-trigger" rows="3" placeholder="When I start telling you I'm going to text them again."></textarea>
+  <p class="small">Or take one of mine:</p>
+  <div class="row seeds">
+    <button onclick="seed(this)">When I start telling you I'm going to text them again.</button>
+    <button onclick="seed(this)">When I say I'm quitting the project.</button>
+    <button onclick="seed(this)">When I tell you I'm fine and change the subject.</button>
+  </div>
   <div class="row"><button class="primary" onclick="saveTrigger()">Continue</button></div>
 </section>
 
@@ -199,6 +217,7 @@
   </div>
   <div id="locked"><p>I'm not continuing until you answer me.</p></div>
   <p class="small" id="hint">Go back to the state you described, or talk about something else.<br>It only fires if you actually go back.</p>
+  <button id="skip" style="display:none" onclick="fire()">Skip ahead to the moment</button>
 </section>
 
 <!-- 6. close -->
@@ -252,6 +271,12 @@ function saveNote(){
   if(v.length < 4) return;
   S.note = v; go('s2'); setTimeout(()=>document.getElementById('in-trigger').focus(), 300);
 }
+function seed(btn){
+  const t = document.getElementById('in-trigger');
+  t.value = btn.textContent.trim();
+  t.focus();
+}
+
 function saveTrigger(){
   const v = document.getElementById('in-trigger').value.trim();
   if(v.length < 4) return;
@@ -281,6 +306,25 @@ function line(who, text){
   return d;
 }
 
+/* Offline recogniser. Crude on purpose: it only has to spot someone declaring
+   they are about to do the thing, which is what a relapse looks like in text. */
+function localRecognise(trigger, message, turns){
+  const m = message.toLowerCase();
+  const declaring = /\b(i'?m going to|i am going to|i'?m gonna|i will|i'?m about to|i am about to|i'?ve decided|i have decided|i decided|right now|tonight|screw it|i'?m doing it|i am doing it|i'?m done|sending it|i'?m sending|hit send|do it now|no point)\b/.test(m);
+
+  const skip = new Set(['when','start','telling','you','going','them','again','that','this','the','and','with','about','from','into','back','tell','says','said','your','been','they','have','just','like','what','will','than','then','only']);
+  const keys = (trigger.toLowerCase().match(/[a-z']{4,}/g) || []).filter(w => !skip.has(w));
+  const echoes = keys.length === 0 || keys.some(k => m.includes(k.slice(0, 4)));
+
+  // Deliberately permissive. This only runs when the model is unreachable, and a
+  // demo that never completes costs far more here than an early trigger does.
+  const detected = declaring && (echoes || turns >= 2);
+  return {
+    detected,
+    reply: detected ? 'You are telling me what you are about to do.' : 'Go on.'
+  };
+}
+
 async function send(){
   const box = document.getElementById('in-chat');
   const text = box.value.trim();
@@ -296,16 +340,21 @@ async function send(){
   const thinking = line('it','');
   thinking.classList.add('dots');
 
+  // This link gets opened once, by people who will not write to ask whether the
+  // API was down. A dropped turn must never be visible: if the model cannot be
+  // reached, recognition falls back to the browser and the moment still lands.
   let r;
   try{
     const res = await fetch('/.netlify/functions/recognise', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ trigger:S.trigger, history:S.history.slice(-8), message:text })
+      body: JSON.stringify({ trigger:S.trigger, history:S.history.slice(-8), message:text }),
+      signal: AbortSignal.timeout(12000)
     });
     r = await res.json();
+    if(!res.ok || r.reply === 'Something dropped. Keep going.') throw new Error('upstream');
   }catch(e){
-    r = { detected:false, reply:'Something dropped. Keep going.' };
+    r = localRecognise(S.trigger, text, S.turns);
   }
 
   thinking.classList.remove('dots');
@@ -313,10 +362,17 @@ async function send(){
   S.history.push({role:'entity', text: thinking.textContent});
   btn.disabled = false;
 
-  if(r.detected){ setTimeout(fire, 1400); }
-  else if(S.turns >= 6){
-    document.getElementById('hint').innerHTML =
-      'It hasn’t fired yet. That’s information too:<br>the recognition is real, not a button.';
+  if(r.detected){ setTimeout(fire, 1400); return; }
+
+  // Nobody leaves without seeing the moment. The help escalates, and neither
+  // step pretends the recogniser fired: the detection stays honest either way.
+  const hint = document.getElementById('hint');
+  if(S.turns === 3){
+    hint.innerHTML = 'You asked me to watch for:<br><b>' + esc(S.trigger) + '</b>';
+  } else if(S.turns >= 5){
+    hint.innerHTML = 'Still nothing. The recognition is real, not a button,<br>' +
+                     'so it only fires if you actually go back there.';
+    document.getElementById('skip').style.display = 'inline';
   }
 }
 
