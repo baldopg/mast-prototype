@@ -14,7 +14,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 const SITE = 'https://mast-prototype.netlify.app';
-const ASSET = 'public/index.html';
+const ASSETS = [
+  ['public/index.html', '/index.html'],       // presentation page
+  ['public/try/index.html', '/try/index.html'], // the prototype itself
+];
 const checkOnly = process.argv.includes('--check');
 
 const sh = (cmd, args) =>
@@ -44,12 +47,16 @@ head === remote
   ? ok(`HEAD y origin/main coinciden (${head.slice(0, 8)})`)
   : bad(`HEAD ${head.slice(0, 8)} no está en el remoto (${remote.slice(0, 8) || 'sin respuesta'}). Haz push primero.`);
 
-// 3. The file on disk must be the file in the commit.
-const onDisk = readFileSync(ASSET);
-const inCommit = execFileSync('git', ['show', `HEAD:${ASSET}`], { maxBuffer: 32 * 1024 * 1024 });
-sha(onDisk) === sha(inCommit)
-  ? ok(`${ASSET} en disco coincide con el commit`)
-  : bad(`${ASSET} en disco difiere del commit`);
+// 3. Each file on disk must be the file in the commit.
+const disk = new Map();
+for (const [path] of ASSETS) {
+  const onDisk = readFileSync(path);
+  disk.set(path, onDisk);
+  const inCommit = execFileSync('git', ['show', `HEAD:${path}`], { maxBuffer: 32 * 1024 * 1024 });
+  sha(onDisk) === sha(inCommit)
+    ? ok(`${path} en disco coincide con el commit`)
+    : bad(`${path} en disco difiere del commit`);
+}
 
 // In --check mode the point is to inspect production, so a dirty tree is reported
 // but does not stop the run. Before a real deploy it does.
@@ -74,25 +81,27 @@ if (!checkOnly) {
 
 // 4. Production must serve those same bytes. This is the check that actually proves it.
 console.log('\nVerificando producción\n');
-const res = await fetch(`${SITE}/index.html`, { cache: 'no-store' });
-if (!res.ok) {
-  console.log(`  FALLO ${SITE} devolvió ${res.status}`);
-  process.exit(1);
+let mismatch = false;
+for (const [path, url] of ASSETS) {
+  const res = await fetch(`${SITE}${url}`, { cache: 'no-store' });
+  if (!res.ok) {
+    mismatch = true;
+    console.log(`  FALLO ${url} devolvió ${res.status}`);
+    continue;
+  }
+  const live = Buffer.from(await res.arrayBuffer());
+  const expected = sha(disk.get(path));
+  if (expected === sha(live)) {
+    console.log(`  ok    ${url} coincide (${live.length} bytes, ${expected.slice(0, 12)}…)`);
+  } else {
+    mismatch = true;
+    console.log(`  FALLO ${url} NO coincide`);
+    console.log(`        esperado ${expected}`);
+    console.log(`        recibido ${sha(live)}`);
+  }
 }
-const live = Buffer.from(await res.arrayBuffer());
-const expected = sha(onDisk);
-const actual = sha(live);
-
-if (expected === actual) {
-  console.log(`  ok    producción sirve el commit ${head.slice(0, 8)}`);
-  console.log(`        sha256 ${expected}`);
-  console.log(`        ${live.length} bytes\n`);
-} else {
-  console.log('  FALLO producción NO sirve esta versión');
-  console.log(`        esperado ${expected}`);
-  console.log(`        recibido ${actual}\n`);
-  process.exit(1);
-}
+if (mismatch) process.exit(1);
+console.log(`  ok    producción sirve el commit ${head.slice(0, 8)}\n`);
 
 // The README is deliberately gitignored; make sure it never leaks.
 const readme = await fetch(`${SITE}/README.md`, { cache: 'no-store' });

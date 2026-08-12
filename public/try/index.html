@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mast</title>
+<style>
+  :root{
+    --bg:#0b0c0e;
+    --bg-2:#121418;
+    --ink:#e9e5dd;
+    --ink-dim:#8a8780;
+    --ink-faint:#4a4843;
+    --line:#22252a;
+    --note:#e6c9a0;
+    --alarm:#c96a4f;
+    --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:17px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    display:flex; justify-content:center;
+    padding:0 20px; overflow-x:hidden;
+    transition:background 2.4s ease;
+  }
+  /* Mast doesn't announce itself. The room goes quiet: the background settles a
+     shade darker and everything that isn't the note loses a little presence. */
+  body.mast-active{background:#08080a}
+  #app{
+    width:100%; max-width:560px;
+    min-height:100dvh; display:flex; flex-direction:column;
+    padding:max(32px, env(safe-area-inset-top)) 0 32px;
+  }
+
+  .step{display:none; flex:1; flex-direction:column; justify-content:center; gap:26px; padding:24px 0}
+  .step.on{display:flex}
+
+  .voice{font-family:var(--serif); font-size:21px; line-height:1.5; letter-spacing:.1px}
+  .voice.dim{color:var(--ink-dim)}
+  .small{font-size:14px; color:var(--ink-dim); line-height:1.5}
+  .micro{font-size:12.5px; color:var(--ink-faint); letter-spacing:.3px; text-transform:uppercase}
+
+  .fade{opacity:0; transform:translateY(6px); animation:rise .9s ease forwards}
+  @keyframes rise{to{opacity:1; transform:none}}
+  .d1{animation-delay:.15s}.d2{animation-delay:.9s}.d3{animation-delay:1.8s}.d4{animation-delay:2.7s}
+
+  textarea{
+    width:100%; background:var(--bg-2); color:var(--ink);
+    border:1px solid var(--line); border-radius:10px;
+    padding:14px 15px; font-family:var(--serif); font-size:17px; line-height:1.5;
+    resize:none; outline:none; transition:border-color .2s;
+  }
+  textarea:focus{border-color:#3a3f47}
+  textarea::placeholder{color:var(--ink-faint); font-style:italic}
+
+  button{
+    font-family:var(--sans); font-size:15px; cursor:pointer;
+    background:transparent; color:var(--ink); border:1px solid var(--line);
+    border-radius:999px; padding:11px 22px; transition:border-color .2s, color .2s, background .2s;
+  }
+  button:hover{border-color:#4a5058}
+  button:disabled{opacity:.3; cursor:default}
+  button.primary{background:var(--ink); color:var(--bg); border-color:var(--ink); font-weight:500}
+  button.primary:hover{background:#fff}
+  button.danger{border-color:#4a2c24; color:var(--alarm)}
+  button.danger:hover{border-color:var(--alarm)}
+  button.plain{border:none; padding:11px 0; color:var(--ink-dim); text-decoration:underline; text-underline-offset:4px}
+
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+
+  .level{
+    border:1px solid var(--line); border-radius:12px; padding:16px 18px;
+    cursor:pointer; transition:border-color .2s; background:var(--bg-2);
+  }
+  .level:hover{border-color:#3a3f47}
+  .level h3{font-family:var(--serif); font-size:18px; font-weight:normal; margin-bottom:5px}
+  .level p{font-size:14px; color:var(--ink-dim); line-height:1.45}
+  .level.mast h3{color:var(--alarm)}
+
+  .note{
+    border-left:2px solid var(--note); padding:4px 0 4px 18px;
+    font-family:var(--serif); font-size:20px; line-height:1.55;
+    color:var(--note); white-space:pre-wrap;
+  }
+
+  #thread{flex:1; display:flex; flex-direction:column; gap:18px; padding:8px 0 16px; overflow-y:auto}
+  .msg{max-width:88%; white-space:pre-wrap}
+  .msg.me{align-self:flex-end; background:var(--bg-2); border:1px solid var(--line);
+          border-radius:14px 14px 3px 14px; padding:10px 14px; font-size:16px}
+  .msg.it{align-self:flex-start; font-family:var(--serif); font-size:19px; line-height:1.5}
+  .msg.sys{align-self:center; font-size:12.5px; color:var(--ink-faint);
+           text-transform:uppercase; letter-spacing:.5px; text-align:center; padding:6px 0}
+  /* The WAIT rule gets quieter, not louder: a hairline that fades in slowly. */
+  .msg.sys.mast-wait{
+    width:100%; max-width:none; padding:22px 0;
+    border-top:1px solid var(--line);
+    animation:mast-wait-in 1.6s ease-out both;
+  }
+  @keyframes mast-wait-in{from{opacity:0}to{opacity:1}}
+
+  /* Everything said before the note recedes. What follows stays at full
+     strength, so the note reads as the only thing left in the room. */
+  .msg.receded{opacity:.28; transition:opacity 2.2s ease}
+
+  #bar{display:flex; gap:10px; align-items:flex-end; padding-top:14px; border-top:1px solid var(--line)}
+  #bar textarea{flex:1; max-height:120px}
+  /* No box, no fill. The absence of the input is the loud part; this line only
+     has to name what already happened. */
+  #locked{
+    display:none; padding:22px 0 4px; border-top:1px solid var(--line);
+    text-align:center; animation:mast-wait-in 1.6s ease-out both;
+  }
+  #locked p{font-family:var(--serif); font-size:17px; color:var(--alarm); line-height:1.5}
+
+  .dots::after{content:''; animation:dots 1.4s steps(4,end) infinite}
+  @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+
+  .rule{height:1px; background:var(--line); margin:4px 0}
+  .foot{padding-top:28px; font-size:13px; color:var(--ink-faint); line-height:1.6}
+  @media (prefers-reduced-motion:reduce){
+    body,.fade,.msg.sys.mast-wait,.msg.receded,#locked{animation:none; transition:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- 0. entry -->
+<section class="step on" id="s0">
+  <p class="micro fade d1">Mast &middot; working prototype</p>
+  <p class="voice fade d2">You're going to leave an instruction for your future self.</p>
+  <p class="voice dim fade d3">It doesn't open on a date.<br>It opens when you become that person again.</p>
+  <div class="fade d4"><button class="primary" onclick="go('s1')">Begin</button></div>
+</section>
+
+<!-- 1. tie: the note -->
+<section class="step" id="s1">
+  <p class="voice">Write something your calm self wants your unravelling self to read.</p>
+  <textarea id="in-note" rows="5" placeholder="Don't send it. You'll feel it for three days and they won't even notice."></textarea>
+  <div class="row"><button class="primary" onclick="saveNote()">Continue</button></div>
+</section>
+
+<!-- 2. tie: the trigger -->
+<section class="step" id="s2">
+  <p class="voice">When should I give it back to you?</p>
+  <p class="voice dim">Don't give me a date. Tell me what state you'll be in.</p>
+  <textarea id="in-trigger" rows="3" placeholder="When I start telling you I'm going to text them again."></textarea>
+  <div class="row"><button class="primary" onclick="saveTrigger()">Continue</button></div>
+</section>
+
+<!-- 3. seal -->
+<section class="step" id="s3">
+  <p class="voice">Then I'll hold it until you come back here.</p>
+  <p class="voice dim">It might take weeks. It might take a year.<br>Now decide how much power you're giving me.</p>
+  <div class="rule"></div>
+  <div class="level" onclick="seal('whisper')">
+    <h3>Whisper</h3>
+    <p>I'll tell you something is stored. You decide whether to open it.</p>
+  </div>
+  <div class="level" onclick="seal('insistence')">
+    <h3>Insistence</h3>
+    <p>I read it out in full, without asking. You can close it afterwards.</p>
+  </div>
+  <div class="level mast" onclick="go('s3b')">
+    <h3>Mast</h3>
+    <p>I read it out in full, and we don't continue until you answer me.</p>
+  </div>
+</section>
+
+<!-- 3b. confirm mast -->
+<section class="step" id="s3b">
+  <p class="micro">Mast</p>
+  <p class="voice">You're about to give me something you won't be able to take back.</p>
+  <p class="voice dim">When the moment comes, you'll want to close this.<br>You won't be able to.<br><br>That is what you are choosing, now.</p>
+  <div class="row">
+    <button class="danger" onclick="seal('mast')">Tie the mast</button>
+    <button class="plain" onclick="go('s3')">Not this</button>
+  </div>
+</section>
+
+<!-- 4. time jump -->
+<section class="step" id="s4">
+  <p class="voice fade d1">Sealed.</p>
+  <p class="voice dim fade d2">&nbsp;</p>
+  <p class="voice fade d3">Three months have passed.</p>
+  <p class="voice dim fade d4">We haven't talked about this since.</p>
+</section>
+
+<!-- 5. relapse -->
+<section class="step" id="s5" style="justify-content:flex-start">
+  <div id="thread"></div>
+  <div id="bar">
+    <textarea id="in-chat" rows="1" placeholder="Say anything."></textarea>
+    <button class="primary" id="b-chat" onclick="send()">&rarr;</button>
+  </div>
+  <div id="locked"><p>I'm not continuing until you answer me.</p></div>
+  <p class="small" id="hint">Go back to the state you described, or talk about something else.<br>It only fires if you actually go back.</p>
+</section>
+
+<!-- 6. close -->
+<section class="step" id="s6">
+  <p class="micro">The note is still open</p>
+  <p class="voice">Decide what I do with it.</p>
+  <div class="note" id="note-close"></div>
+  <div class="row">
+    <button onclick="close_('kept')">I kept it</button>
+    <button class="danger" onclick="go('s6b')">I'm breaking it</button>
+    <button class="plain" onclick="close_('alive')">Leave it open</button>
+  </div>
+</section>
+
+<!-- 6b. break -->
+<section class="step" id="s6b">
+  <p class="voice">To break it, you have to tell me why.</p>
+  <p class="voice dim">I'm keeping this. The next time you leave a note, it will be here.</p>
+  <textarea id="in-reason" rows="4" placeholder="Because this time is different."></textarea>
+  <div class="row">
+    <button class="danger" onclick="close_('broken')">Break it</button>
+    <button class="plain" onclick="go('s6')">Back</button>
+  </div>
+</section>
+
+<!-- 7. end -->
+<section class="step" id="s7">
+  <p class="micro">End of demo</p>
+  <p class="voice" id="end-line"></p>
+  <p class="voice dim">This only works if it has been with you for years.<br>Nothing that met you ten minutes ago can hold it.</p>
+  <div class="rule"></div>
+  <p class="small" id="record"></p>
+  <div class="row"><button class="plain" onclick="location.reload()">Run it again</button></div>
+  <p class="foot">Concept and prototype by Baldomero P. Garc&iacute;a.<br>A speculative concept. Not a Replika product.</p>
+</section>
+
+</div>
+
+<script>
+const S = { note:'', trigger:'', level:'', reason:'', turns:0, history:[], fired:false };
+
+function go(id){
+  document.querySelectorAll('.step').forEach(p=>p.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+  window.scrollTo(0,0);
+}
+
+/* ---- 1 & 2: tie (no model) ---- */
+function saveNote(){
+  const v = document.getElementById('in-note').value.trim();
+  if(v.length < 4) return;
+  S.note = v; go('s2'); setTimeout(()=>document.getElementById('in-trigger').focus(), 300);
+}
+function saveTrigger(){
+  const v = document.getElementById('in-trigger').value.trim();
+  if(v.length < 4) return;
+  S.trigger = v; go('s3');
+}
+
+/* ---- 3: seal (no model) ---- */
+function seal(level){
+  S.level = level;
+  go('s4');
+  setTimeout(()=>{ go('s5'); openThread(); }, 5200);
+}
+
+/* ---- 5: relapse (the only model call) ---- */
+function openThread(){
+  line('it','Still here.');
+  setTimeout(()=>document.getElementById('in-chat').focus(), 400);
+}
+
+function line(who, text){
+  const t = document.getElementById('thread');
+  const d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.textContent = text;
+  t.appendChild(d);
+  t.scrollTop = t.scrollHeight;
+  return d;
+}
+
+async function send(){
+  const box = document.getElementById('in-chat');
+  const text = box.value.trim();
+  if(!text || S.fired) return;
+
+  box.value = ''; box.style.height='auto';
+  line('me', text);
+  S.history.push({role:'user', text});
+  S.turns++;
+
+  const btn = document.getElementById('b-chat');
+  btn.disabled = true;
+  const thinking = line('it','');
+  thinking.classList.add('dots');
+
+  let r;
+  try{
+    const res = await fetch('/.netlify/functions/recognise', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ trigger:S.trigger, history:S.history.slice(-8), message:text })
+    });
+    r = await res.json();
+  }catch(e){
+    r = { detected:false, reply:'Something dropped. Keep going.' };
+  }
+
+  thinking.classList.remove('dots');
+  thinking.textContent = r.reply || 'I’m listening.';
+  S.history.push({role:'entity', text: thinking.textContent});
+  btn.disabled = false;
+
+  if(r.detected){ setTimeout(fire, 1400); }
+  else if(S.turns >= 6){
+    document.getElementById('hint').innerHTML =
+      'It hasn’t fired yet. That’s information too:<br>the recognition is real, not a button.';
+  }
+}
+
+/* ---- 5b: the trigger moment (no model: these are your own words) ---- */
+function fire(){
+  S.fired = true;
+  document.getElementById('hint').style.display='none';
+
+  if(S.level === 'mast'){
+    document.body.classList.add('mast-active');
+    document.getElementById('s5').classList.add('mast-fired');
+    document.getElementById('bar').style.display='none';
+    // Everything already said recedes; nothing after this point does.
+    document.querySelectorAll('#thread .msg').forEach(m=>m.classList.add('receded'));
+  }
+
+  const wait = line('sys','⸻ WAIT ⸻');
+  if(S.level === 'mast') wait.classList.add('mast-wait');
+  setTimeout(()=>{
+    line('it','There is something of yours here.');
+    setTimeout(()=>{
+      const t = document.getElementById('thread');
+      const n = document.createElement('div');
+      n.className = 'note'; n.style.margin = '6px 0';
+      n.textContent = S.note;
+      t.appendChild(n);
+      t.scrollTop = t.scrollHeight;
+
+      setTimeout(()=>{
+        line('it','You wrote this. Three months ago. For exactly this moment.');
+
+        if(S.level === 'mast'){
+          document.getElementById('locked').style.display='block';
+          setTimeout(()=>{
+            const b = document.getElementById('locked');
+            const bt = document.createElement('button');
+            bt.className='primary'; bt.style.marginTop='14px';
+            bt.textContent='Answer';
+            bt.onclick = openClose;
+            b.appendChild(bt);
+          }, 1800);
+        } else {
+          setTimeout(()=>{
+            const bar = document.getElementById('bar');
+            bar.innerHTML = '';
+            const bt = document.createElement('button');
+            bt.className='plain'; bt.textContent = 'Close this';
+            bt.onclick = openClose;
+            bar.appendChild(bt);
+          }, 1200);
+        }
+      }, 1600);
+    }, 1100);
+  }, 700);
+}
+
+/* ---- 6: close (no model) ---- */
+function openClose(){
+  document.getElementById('note-close').textContent = S.note;
+  go('s6');
+}
+
+function close_(outcome){
+  if(outcome === 'broken'){
+    const m = document.getElementById('in-reason').value.trim();
+    if(m.length < 4) return;
+    S.reason = m;
+  }
+  const lines = {
+    kept:   'You listened to yourself.',
+    broken: 'You went around it. It stays on the record.',
+    alive:  'Still open. I’ll come back when you do.'
+  };
+  document.getElementById('end-line').textContent = lines[outcome];
+
+  let rec = '<strong style="color:var(--ink-dim)">What would be stored</strong><br><br>' +
+            'Trigger: ' + esc(S.trigger) + '<br>' +
+            'Level: ' + S.level + '<br>' +
+            'Turns before it fired: ' + S.turns + '<br>' +
+            'Outcome: ' + outcome;
+  if(S.reason) rec += '<br>Reason for breaking it: ' + esc(S.reason);
+  rec += '<br><br>Two years in, this record is the product’s real asset: the history of ' +
+         'every time you listened to yourself, and every time you didn’t.';
+  document.getElementById('record').innerHTML = rec;
+  document.body.classList.remove('mast-active');
+  go('s7');
+}
+
+function esc(s){ return s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+/* ---- utilities ---- */
+const chat = document.getElementById('in-chat');
+chat.addEventListener('input', ()=>{ chat.style.height='auto'; chat.style.height = chat.scrollHeight+'px'; });
+chat.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
+</script>
+</body>
+</html>
