@@ -126,7 +126,11 @@ export default async (req) => {
         contents,
         generationConfig: {
           temperature: 0.8,
-          maxOutputTokens: 300,
+          // 2.5-flash spends output tokens on thinking before it writes. At 300 the
+          // budget ran out mid-JSON on roughly a third of turns, the parser rejected
+          // the truncated object, and detection silently failed closed.
+          thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: 512,
           responseMimeType: 'application/json',
           // Forces the shape server-side, so a drifting prompt can no longer
           // produce output the fail-closed parser has to reject.
@@ -176,7 +180,19 @@ export default async (req) => {
         // Keep trying; invalid model output must never fire the note.
       }
     }
-    if (!out) out = { detected: false, reply: "I'm listening." };
+    if (!out) {
+      // A silent fallback here looks identical to a bland reply, which is how the
+      // truncation bug hid. Make every rejection visible in the function logs.
+      console.error(
+        'parse rejected',
+        JSON.stringify({
+          finishReason: data?.candidates?.[0]?.finishReason ?? null,
+          usage: data?.usageMetadata ?? null,
+          raw: raw.slice(0, 300),
+        })
+      );
+      out = { detected: false, reply: "I'm listening." };
+    }
 
     return json({
       detected: out.detected === true,
