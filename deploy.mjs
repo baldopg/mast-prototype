@@ -9,7 +9,7 @@
 //   node deploy.mjs          deploy and verify
 //   node deploy.mjs --check  verify only, change nothing
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
@@ -61,11 +61,9 @@ if (failed && !checkOnly) {
 if (!checkOnly) {
   console.log('\nDesplegando\n');
   try {
-    // On Windows `netlify` is a .cmd shim, which execFileSync cannot resolve on its own.
-    const out = execFileSync('netlify', ['deploy', '--prod', '--no-build'], {
-      encoding: 'utf8',
-      shell: process.platform === 'win32',
-    });
+    // execSync with a fixed string: on Windows `netlify` is a .cmd shim that
+    // execFileSync cannot resolve, and passing args alongside shell:true is deprecated.
+    const out = execSync('netlify deploy --prod --no-build', { encoding: 'utf8' });
     const url = out.match(/Unique deploy URL:\s*<?(\S+?)>?\s/);
     console.log('  ok    desplegado' + (url ? ` (${url[1]})` : ''));
   } catch (e) {
