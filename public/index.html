@@ -25,7 +25,14 @@
     -webkit-font-smoothing:antialiased;
     display:flex; justify-content:center;
     padding:0 20px; overflow-x:hidden;
+    transition:background .45s ease;
   }
+  body.mast-active{background:#160b08}
+  body.mast-active::before{
+    content:''; position:fixed; inset:0; z-index:20; pointer-events:none;
+    border:2px solid var(--alarm); animation:mast-frame .65s ease-out both;
+  }
+  @keyframes mast-frame{from{opacity:0}to{opacity:1}}
   #app{
     width:100%; max-width:560px;
     min-height:100dvh; display:flex; flex-direction:column;
@@ -90,10 +97,32 @@
   .msg.it{align-self:flex-start; font-family:var(--serif); font-size:19px; line-height:1.5}
   .msg.sys{align-self:center; font-size:12.5px; color:var(--ink-faint);
            text-transform:uppercase; letter-spacing:.5px; text-align:center; padding:6px 0}
+  .msg.sys.mast-wait{
+    width:100%; max-width:none; padding:13px 0;
+    color:var(--alarm); border-top:1px solid var(--alarm); border-bottom:1px solid var(--alarm);
+    font-weight:650; letter-spacing:2px; animation:mast-wait-in .45s ease-out both;
+  }
+  @keyframes mast-wait-in{from{opacity:0; transform:scaleX(.92)}to{opacity:1; transform:none}}
+
+  #mast-signal{
+    display:none; min-height:42px; align-items:center; justify-content:space-between;
+    padding:0 0 12px; border-bottom:1px solid #613225;
+    color:var(--alarm); font-size:12px; font-weight:650; text-transform:uppercase;
+    letter-spacing:1.8px;
+  }
+  #mast-signal span:last-child{color:var(--ink-dim); letter-spacing:.8px}
+  #s5.mast-fired #mast-signal{display:flex}
+  #s5.mast-fired .note{
+    padding:16px 18px; border:1px solid #70402f; border-left:3px solid var(--note);
+    background:#1a100d;
+  }
 
   #bar{display:flex; gap:10px; align-items:flex-end; padding-top:14px; border-top:1px solid var(--line)}
   #bar textarea{flex:1; max-height:120px}
-  #locked{display:none; padding:16px 0; border-top:1px solid #3a2520; text-align:center}
+  #locked{
+    display:none; padding:20px 16px; border:1px solid #70402f;
+    background:#1a0d0a; text-align:center;
+  }
   #locked p{font-family:var(--serif); font-size:17px; color:var(--alarm); line-height:1.5}
 
   .dots::after{content:''; animation:dots 1.4s steps(4,end) infinite}
@@ -101,6 +130,9 @@
 
   .rule{height:1px; background:var(--line); margin:4px 0}
   .foot{padding-top:28px; font-size:13px; color:var(--ink-faint); line-height:1.6}
+  @media (prefers-reduced-motion:reduce){
+    body,.fade,.msg.sys.mast-wait{animation:none; transition:none}
+  }
 </style>
 </head>
 <body>
@@ -169,6 +201,7 @@
 
 <!-- 5. relapse -->
 <section class="step" id="s5" style="justify-content:flex-start">
+  <div id="mast-signal" role="status" aria-live="polite"><span>Mast</span><span>Bound</span></div>
   <div id="thread"></div>
   <div id="bar">
     <textarea id="in-chat" rows="1" placeholder="Say anything."></textarea>
@@ -302,7 +335,14 @@ function fire(){
   S.fired = true;
   document.getElementById('hint').style.display='none';
 
-  line('sys','⸻ WAIT ⸻');
+  if(S.level === 'mast'){
+    document.body.classList.add('mast-active');
+    document.getElementById('s5').classList.add('mast-fired');
+    document.getElementById('bar').style.display='none';
+  }
+
+  const wait = line('sys','⸻ WAIT ⸻');
+  if(S.level === 'mast') wait.classList.add('mast-wait');
   setTimeout(()=>{
     line('it','There is something of yours here.');
     setTimeout(()=>{
@@ -317,7 +357,6 @@ function fire(){
         line('it','You wrote this. Three months ago. For exactly this moment.');
 
         if(S.level === 'mast'){
-          document.getElementById('bar').style.display='none';
           document.getElementById('locked').style.display='block';
           setTimeout(()=>{
             const b = document.getElementById('locked');
@@ -370,6 +409,7 @@ function close_(outcome){
   rec += '<br><br>Two years in, this record is the product’s real asset: the history of ' +
          'every time you listened to yourself, and every time you didn’t.';
   document.getElementById('record').innerHTML = rec;
+  document.body.classList.remove('mast-active');
   go('s7');
 }
 
