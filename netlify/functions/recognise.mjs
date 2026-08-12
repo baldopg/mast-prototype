@@ -65,13 +65,18 @@ export default async (req) => {
     contents.push({ role: 'user', parts: [{ text: message }] });
   }
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
+  const baseUrl = (
+    process.env.GOOGLE_GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com'
+  ).replace(/\/+$/, '');
+  const url = `${baseUrl}/v1beta/models/${MODEL}:generateContent`;
 
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': key,
+      },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: instruction(trigger) }] },
         contents,
