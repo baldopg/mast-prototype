@@ -155,8 +155,11 @@ export default async (req) => {
   ).replace(/\/+$/, '');
   const url = `${baseUrl}/v1beta/models/${MODEL}:generateContent`;
 
-  try {
-    const res = await fetch(url, {
+  // The free tier rate-limits per minute, and a single dropped turn lands on the
+  // pivotal moment of the demo. One retry absorbs a transient 429 or 5xx; a real
+  // fault still surfaces, only a second later.
+  const postOnce = () =>
+    fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -187,10 +190,24 @@ export default async (req) => {
       }),
     });
 
+  try {
+    let res = await postOnce();
+    if (!res.ok && [429, 500, 502, 503, 504].includes(res.status)) {
+      const first = res.status;
+      await new Promise((r) => setTimeout(r, 900));
+      res = await postOnce();
+      console.error('gemini retried', first, '->', res.status);
+    }
+
     if (!res.ok) {
       const detail = await res.text();
       console.error('gemini', res.status, detail.slice(0, 400));
-      return json({ detected: false, reply: 'Something dropped. Keep going.' });
+      // upstream is for diagnosis from the browser; the user-facing string is unchanged.
+      return json({
+        detected: false,
+        reply: 'Something dropped. Keep going.',
+        upstream: res.status,
+      });
     }
 
     const data = await res.json();
