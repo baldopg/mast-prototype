@@ -33,6 +33,7 @@ On every message you do two things:
      shifted. Announce nothing. Just mark the moment.
 
 Reply with JSON only, no text around it:
+Start with { and end with }. Never add an introduction or a code fence.
 {"detected": true, "reply": "..."}
 `.trim();
 
@@ -97,14 +98,32 @@ export default async (req) => {
     const data = await res.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const clean = raw.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const objectStart = clean.indexOf('{');
+    const objectEnd = clean.lastIndexOf('}');
+    const candidates = [
+      clean,
+      objectStart >= 0 && objectEnd > objectStart
+        ? clean.slice(objectStart, objectEnd + 1)
+        : '',
+    ];
 
     let out;
-    try {
-      out = JSON.parse(clean);
-    } catch {
-      // if the model breaks format, never fire by accident
-      out = { detected: false, reply: clean.slice(0, 200) || 'I’m listening.' };
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (
+          parsed &&
+          typeof parsed.detected === 'boolean' &&
+          typeof parsed.reply === 'string'
+        ) {
+          out = parsed;
+          break;
+        }
+      } catch {
+        // Keep trying; invalid model output must never fire the note.
+      }
     }
+    if (!out) out = { detected: false, reply: "I'm listening." };
 
     return json({
       detected: out.detected === true,
